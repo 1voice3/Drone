@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Maelstrom Flight Sim</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Maelstrom">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--bg:#0d1b24;--panel:#142833;--line:#27414f;--foam:#e3f4f1;--dim:#8fb0b8;--amber:#ffb347;--warn:#ff6b5a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--foam);font-family:"Avenir Next",ui-rounded,-apple-system,"Helvetica Neue",sans-serif;overscroll-behavior:none}
+body{display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
+#map{flex:1 1 45%;min-height:200px;background:#0a141b}
+#sheet{flex:0 0 auto;max-height:55%;overflow-y:auto;background:var(--panel);border-top:2px solid var(--amber);padding:10px 12px calc(12px + env(safe-area-inset-bottom,0px))}
+h1{font-size:17px;margin:0 0 8px;display:flex;justify-content:space-between;align-items:baseline}
+h1 small{font-size:12px;font-weight:500;color:var(--dim)}
+.hud{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.hud div{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 4px;text-align:center}
+.hud b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
+.hud span{font-size:11px;color:var(--dim)}
+#bat.low{color:var(--warn)}
+.row{display:flex;gap:6px;margin-bottom:8px;align-items:center}
+button,select,textarea,input{font:inherit;font-size:15px;color:var(--foam);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+button{flex:1;font-weight:600}
+button.go{background:var(--amber);color:#2a1a00;border-color:var(--amber)}
+button:active{opacity:.7}
+textarea{width:100%;height:84px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+label{font-size:12px;color:var(--dim)}
+#status{font-size:13px;color:var(--amber);margin:2px 0 8px;min-height:18px}
+#wps{font-size:13px;color:var(--dim);margin:0;padding-left:20px}
+#wps li{padding:3px 0}
+#wps button{padding:2px 8px;flex:none;font-size:12px;margin-left:6px}
+.drone{width:34px;height:34px;transition:none}
+.drone svg{width:34px;height:34px;filter:drop-shadow(0 0 4px #000)}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="sheet">
+  <h1>Maelstrom <small id="state">Ready</small></h1>
+  <div class="hud">
+    <div><b id="alt">0</b><span>alt m</span></div>
+    <div><b id="spd">0</b><span>speed m/s</span></div>
+    <div><b id="hdg">0°</b><span>heading</span></div>
+    <div><b id="bat">100</b><span>battery %</span></div>
+  </div>
+  <div class="row">
+    <button class="go" id="play">Start flight</button>
+    <button id="reset">Reset</button>
+    <select id="mult" aria-label="Time speed"><option value="1">1x</option><option value="5">5x</option><option value="10">10x</option><option value="25">25x</option></select>
+  </div>
+  <div id="status"></div>
+  <div class="row">
+    <label>Cruise m/s <input id="cs" type="number" value="15" min="1" max="30" style="width:64px"></label>
+    <label>Default alt m <input id="da" type="number" value="80" min="5" max="120" style="width:64px"></label>
+    <label><input id="loop" type="checkbox" style="width:auto"> Loop</label>
+  </div>
+  <label for="paste">Paste Google Earth coordinates (lat, lon, alt per line) or KML</label>
+  <textarea id="paste" placeholder="37.8199, -122.4783, 90&#10;37.8267, -122.4230, 120"></textarea>
+  <div class="row" style="margin-top:6px">
+    <button id="load">Load route</button>
+    <button id="clear">Clear route</button>
+  </div>
+  <p style="font-size:12px;color:var(--dim);margin:4px 0">Tap the map to add a waypoint. Distance <span id="dist">0</span> m of <span id="total">0</span> m.</p>
+  <ol id="wps"></ol>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var R=6371000,rad=Math.PI/180;
+var DEMO=[[37.8199,-122.4783,90],[37.8267,-122.4230,110],[37.8083,-122.4156,80],[37.7955,-122.3937,100],[37.8024,-122.4058,70]];
+var wps=[],markers=[],line=null,trail=null;
+var map=L.map('map',{zoomControl:false,attributionControl:true}).setView([37.81,-122.43],12);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,attribution:'Imagery &copy; Esri'}).addTo(map);
+var droneIcon=L.divIcon({className:'drone',iconSize:[34,34],iconAnchor:[17,17],html:'<svg viewBox="0 0 34 34"><g id="dr" transform="rotate(0 17 17)"><path d="M17 3 L24 26 L17 21 L10 26 Z" fill="#ffb347" stroke="#2a1a00" stroke-width="1.5"/></g></svg>'});
+var drone=L.marker([37.81,-122.43],{icon:droneIcon,interactive:false}).addTo(map);
+
+function dist(a,b){var dl=(b[0]-a[0])*rad,dn=(b[1]-a[1])*rad,x=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a[0]*rad)*Math.cos(b[0]*rad)*Math.sin(dn/2)*Math.sin(dn/2);return 2*R*Math.asin(Math.sqrt(x))}
+function bearing(a,b){var y=Math.sin((b[1]-a[1])*rad)*Math.cos(b[0]*rad),x=Math.cos(a[0]*rad)*Math.sin(b[0]*rad)-Math.sin(a[0]*rad)*Math.cos(b[0]*rad)*Math.cos((b[1]-a[1])*rad);return (Math.atan2(y,x)/rad+360)%360}
+
+var sim;
+function fresh(){sim={phase:'ready',leg:0,d:0,alt:0,bat:100,flown:0,hdg:0,spd:0,pos:wps.length?[wps[0][0],wps[0][1]]:[37.81,-122.43],run:false};}
+fresh();
+
+function total(){var t=0;for(var i=1;i<wps.length;i++)t+=dist(wps[i-1],wps[i]);return t}
+function draw(){
+  markers.forEach(function(m){map.removeLayer(m)});markers=[];
+  if(line)map.removeLayer(line);if(trail)map.removeLayer(trail);
+  line=L.polyline(wps.map(function(w){return [w[0],w[1]]}),{color:'#e3f4f1',weight:2,dashArray:'6 6'}).addTo(map);
+  trail=L.polyline([],{color:'#ffb347',weight:4}).addTo(map);
+  wps.forEach(function(w,i){markers.push(L.circleMarker([w[0],w[1]],{radius:7,color:'#0d1b24',weight:2,fillColor:i==0?'#ffb347':'#e3f4f1',fillOpacity:1}).addTo(map))});
+  var ol=$('wps');ol.innerHTML='';
+  wps.forEach(function(w,i){var li=document.createElement('li');li.textContent=w[0].toFixed(5)+', '+w[1].toFixed(5)+' at '+w[2]+' m';var b=document.createElement('button');b.textContent='Remove';b.onclick=function(){wps.splice(i,1);save();fresh();draw();hud()};li.appendChild(b);ol.appendChild(li)});
+  $('total').textContent=Math.round(total());
+  drone.setLatLng(sim.pos);
+}
+function hud(){
+  $('alt').textContent=Math.round(sim.alt);$('spd').textContent=sim.spd.toFixed(1);
+  $('hdg').textContent=Math.round(sim.hdg)+'°';
+  var b=$('bat');b.textContent=Math.round(sim.bat);b.className=sim.bat<20?'low':'';
+  $('dist').textContent=Math.round(sim.flown);
+  var names={ready:'Ready',takeoff:'Takeoff',cruise:'Cruise',landing:'Landing',done:'Landed',dead:'Battery empty'};
+  $('state').textContent=names[sim.phase]+(sim.run?'':(sim.phase=='ready'||sim.phase=='done'?'':' (paused)'));
+  var g=document.getElementById('dr');if(g)g.setAttribute('transform','rotate('+sim.hdg+' 17 17)');
+  $('play').textContent=sim.run?'Pause':(sim.phase=='ready'?'Start flight':sim.phase=='done'?'Fly again':'Resume');
+}
+function say(t){$('status').textContent=t}
+function save(){try{localStorage.setItem('maelstrom-route',JSON.stringify(wps))}catch(e){}}
+
+function step(dt){
+  var cs=Math.max(1,+$('cs').value||15);
+  if(sim.phase=='takeoff'){
+    sim.alt+=3*dt;sim.spd=0;
+    if(sim.alt>=wps[0][2]){sim.alt=wps[0][2];sim.phase='cruise';say('Cruising to waypoint 2.')}
+  }else if(sim.phase=='cruise'){
+    var a=wps[sim.leg],b=wps[sim.leg+1],L1=dist(a,b);
+    sim.hdg=bearing(a,b);sim.spd=cs;
+    var mv=cs*dt;sim.d+=mv;sim.flown+=mv;
+    while(sim.d>=L1){
+      sim.d-=L1;sim.leg++;
+      if(sim.leg>=wps.length-1){
+        if($('loop').checked&&wps.length>1){sim.leg=0;sim.d=0;say('Loop: back to waypoint 1.')}
+        else{sim.phase='landing';sim.pos=[b[0],b[1]];sim.alt=b[2];sim.spd=0;say('Final waypoint reached. Landing.');return}
+      }
+      a=wps[sim.leg];b=wps[sim.leg+1];L1=dist(a,b);
+      say('Heading to waypoint '+(sim.leg+2)+'.');
+    }
+    var f=L1?sim.d/L1:0;
+    sim.pos=[a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f];
+    sim.alt=a[2]+(b[2]-a[2])*f;
+  }else if(sim.phase=='landing'){
+    sim.alt-=2*dt;
+    if(sim.alt<=0){sim.alt=0;sim.phase='done';sim.run=false;say('Landed. Battery '+Math.round(sim.bat)+'%.')}
+  }
+  if(sim.phase!='done'){sim.bat-=dt*(100/1500)*(sim.phase=='cruise'?cs/15:0.7)}
+  if(sim.bat<=0){sim.bat=0;sim.phase='dead';sim.run=false;say('Battery empty. Reset to fly again.')}
+  else if(sim.bat<20&&sim.run)say('Low battery: '+Math.round(sim.bat)+'%.');
+}
+var last=0;
+function frame(t){
+  if(sim.run){
+    var dt=Math.min(0.1,(t-last)/1000)*(+$('mult').value||1);
+    var n=Math.ceil(dt/0.25),i;for(i=0;i<n&&sim.run;i++)step(dt/n);
+    drone.setLatLng(sim.pos);trail.addLatLng(sim.pos);
+    map.panTo(sim.pos,{animate:false});hud();
+  }
+  last=t;requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+$('play').onclick=function(){
+  if(wps.length<2){say('Add at least 2 waypoints first.');return}
+  if(sim.phase=='done'||sim.phase=='dead'){fresh();draw()}
+  if(sim.phase=='ready'){sim.phase='takeoff';sim.alt=0;sim.pos=[wps[0][0],wps[0][1]];say('Taking off from waypoint 1.')}
+  sim.run=!sim.run;hud();
+};
+$('reset').onclick=function(){fresh();draw();hud();say('Reset. Ready for takeoff.')};
+$('clear').onclick=function(){wps=[];save();fresh();draw();hud();say('Route cleared. Tap the map to add waypoints.')};
+
+function parse(txt){
+  var out=[],m,da=+$('da').value||80;
+  if(/<coordinates>/i.test(txt)){
+    var re=/<coordinates>([\s\S]*?)<\/coordinates>/gi;
+    while((m=re.exec(txt))){m[1].trim().split(/\s+/).forEach(function(c){var p=c.split(',').map(Number);if(p.length>=2&&isFinite(p[0])&&isFinite(p[1]))out.push([p[1],p[0],p.length>2&&p[2]>0?Math.min(p[2],120):da])})}
+  }else{
+    txt.split(/\n/).forEach(function(l){var p=l.replace(/[°NSEW]/g,' ').split(/[,;\s]+/).filter(Boolean).map(Number);if(p.length>=2&&isFinite(p[0])&&isFinite(p[1])&&Math.abs(p[0])<=90&&Math.abs(p[1])<=180)out.push([p[0],p[1],p.length>2&&p[2]>0?Math.min(p[2],120):da])});
+  }
+  return out;
+}
+$('load').onclick=function(){
+  var r=parse($('paste').value);
+  if(!r.length){say('No coordinates found. Use lat, lon, alt per line (decimal degrees).');return}
+  wps=r;save();fresh();draw();hud();map.fitBounds(L.latLngBounds(wps.map(function(w){return [w[0],w[1]]})),{padding:[30,30]});
+  say(r.length+' waypoints loaded.');
+};
+map.on('click',function(e){
+  if(sim.run)return;
+  wps.push([+e.latlng.lat.toFixed(6),+e.latlng.lng.toFixed(6),+$('da').value||80]);
+  save();fresh();draw();hud();say('Waypoint '+wps.length+' added.');
+});
+
+try{var s=localStorage.getItem('maelstrom-route');if(s)wps=JSON.parse(s)}catch(e){}
+if(!wps||!wps.length){wps=DEMO.slice();say('Demo route over San Francisco Bay loaded. Press Start flight.')}
+fresh();draw();hud();
+map.fitBounds(L.latLngBounds(wps.map(function(w){return [w[0],w[1]]})),{padding:[30,30]});
+})();
+</script>
+</body>
+</html>

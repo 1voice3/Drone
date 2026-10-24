@@ -1,0 +1,54 @@
+MAELSTROM FLIGHT SIM - NOTES
+
+WHAT IT IS
+A drone flight simulator that runs in Safari on iPhone. It flies the
+Maelstrom drone along a route of Google Earth coordinates over satellite
+imagery. It needs an internet connection for the map.
+
+INSTALL ON IPHONE
+1. Upload index.html to your GitHub repository.
+2. Turn on GitHub Pages for the repository.
+3. Open the Pages link in Safari.
+4. Tap Share, then Add to Home Screen.
+
+HOW TO FLY
+1. Load a route (see below) or use the demo route.
+2. Tap Start flight. The drone takes off, flies each leg, then lands.
+3. Tap Pause to hold. Tap Resume to continue.
+4. Tap Reset to return to the start.
+5. Use the 1x to 25x menu to speed up time.
+6. Turn on Loop to repeat the route.
+
+GETTING COORDINATES FROM GOOGLE EARTH
+Option 1: Tap or click a spot in Google Earth, copy the latitude and
+longitude, and paste one point per line.
+Option 2: Draw a path in Google Earth, export it as KML, open the KML as
+text, and paste the whole thing.
+
+COORDINATE FORMAT (decimal degrees, one point per line)
+latitude, longitude, altitude in meters
+Altitude is optional. If left out, the Default alt value is used.
+Altitude is limited to 120 m.
+
+EXAMPLE ROUTE (San Francisco Bay)
+37.8199, -122.4783, 90
+37.8267, -122.4230, 110
+37.8083, -122.4156, 80
+37.7955, -122.3937, 100
+37.8024, -122.4058, 70
+
+KML NOTE
+KML lists longitude first (lon, lat, alt). The app flips it for you.
+
+SETTINGS
+Cruise m/s: forward speed.
+Default alt m: altitude used for tapped waypoints and lines without altitude.
+Loop: repeat the route after the last waypoint.
+
+SIMULATION VALUES
+Climb 3 m/s. Descent 2 m/s. Battery about 25 minutes at 15 m/s.
+Low battery warning below 20 percent.
+
+FILES
+index.html - the app
+index.txt - these notes
