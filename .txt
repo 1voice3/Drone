@@ -51,4 +51,4 @@ Low battery warning below 20 percent.
 
 FILES
 index.html - the app
-index.txt - these notes
+.txt - these notes
